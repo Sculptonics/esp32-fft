@@ -14,8 +14,28 @@
 #include "soc/timer_group_struct.h"
 #include "driver/periph_ctrl.h"
 #include "driver/timer.h"
+#include "driver/gpio.h"
 
 #include "fft.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <sys/unistd.h>
+#include <sys/stat.h>
+#include "sdkconfig.h"
+#include "esp_log.h"
+#include "esp_err.h"
+#include "esp_system.h"
+#include "esp_vfs_fat.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/i2s_std.h"
+#include "driver/gpio.h"
+#include "driver/spi_common.h"
+#include "sdmmc_cmd.h"
+
+#include "freertos/queue.h"
 
 /* Can run 'make menuconfig' to choose the GPIO to blink,
    or you can edit the following line and set a number here.
@@ -24,7 +44,7 @@
 #define MIN_LOG_N 6
 #define MAX_LOG_N 12
 
-#define GPIO_OUTPUT 27
+#define GPIO_OUTPUT 48
 
 double start, end;
 
@@ -37,7 +57,7 @@ timer_config_t timer_config = {
 
 gpio_config_t gpio_conf = {
   // disable interrupt
-  .intr_type = GPIO_PIN_INTR_DISABLE,
+  .intr_type = GPIO_INTR_DISABLE,//GPIO_PIN_INTR_DISABLE,
   //set as output mode
   .mode = GPIO_MODE_OUTPUT,
   //bit mask of the pins that you want to set,e.g.GPIO18/19
