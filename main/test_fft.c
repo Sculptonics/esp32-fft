@@ -73,7 +73,7 @@ static i2s_chan_handle_t rx_chan; // I2S rx channel handler
 static int16_t i2s_readraw_buff[SAMPLE_SIZE];
 QueueHandle_t sample_queue, frequency_queue;
 
-int32_t raw_samples[BUFF_SIZE] = {0};
+//int32_t raw_samples[BUFF_SIZE] = {0};
 size_t bytes_read;
 const int WAVE_HEADER_SIZE = 44;
 
@@ -97,28 +97,29 @@ static void fft_task(void *args)
         // Receive data from the queue
         if (xQueueReceive(sample_queue, (void *)fft_samples, portMAX_DELAY) == pdTRUE)
         {
+
             // Fill array with some dummy data
             for (int k = 0 ; k < fft_analysis->size ; k++){
               fft_analysis->input[k] = fft_samples[k];
-               ESP_LOGI(TAG, "%d-th smp : %f", k, fft_samples[k]);
+               //ESP_LOGI(TAG, "%d-th smp : %f", k, fft_samples[k]);
             }
             // Execute transformation
-            fft_execute(fft_analysis);
+            //fft_execute(fft_analysis);
             // Now do something with the output
             //ESP_LOGI(TAG,"DC component : %f", fft_analysis->output[0]);  // DC is at [0]
-            u8g2_ClearBuffer(&u8g2);
+            /*u8g2_ClearBuffer(&u8g2);
             int scale = fft_analysis->size/2/u8g2.height;
             int real0 = sqrt(pow (fft_analysis->output[2], 2) + pow(fft_analysis->output[2+1], 2));
             for (int k = 1 ; k < fft_analysis->size / 2 ; k+=scale){
-              ESP_LOGD(TAG, "%d-th freq : %f+j%f", k, fft_analysis->output[2*k], fft_analysis->output[2*k+1]);
+              //ESP_LOGI(TAG, "%d-th freq : %f+j%f", k, fft_analysis->output[2*k], fft_analysis->output[2*k+1]);
               float real1 = sqrt(pow (fft_analysis->output[2*(k+scale)], 2) + pow(fft_analysis->output[2*(k+scale)+1], 2));
-              ESP_LOGI(TAG, "%d-th freq : %f", k, real0);
+              ESP_LOGD(TAG, "%d-th freq : %f", k, real0);
               
               u8g2_DrawLine(&u8g2, k/scale,     u8g2.height - ((int)real0 + u8g2.height/2), 
                                    k/scale + 1, u8g2.height - ((int)real1 + u8g2.height/2));
               real0 = real1;
             }
-            u8g2_SendBuffer(&u8g2);
+            u8g2_SendBuffer(&u8g2);*/
               //printf("Middle component : %f\n", fft_analysis->output[1]);  // N/2 is real and stored at [1]
         }
         vTaskDelay(pdMS_TO_TICKS(80));
@@ -183,24 +184,26 @@ void record_wav(uint32_t rec_time)
     {
         size_t bytes_read = 0;
         // Read the RAW samples from the microphone
-        i2s_channel_read(rx_chan, raw_samples, sizeof(int32_t) * BUFF_SIZE, &bytes_read, portMAX_DELAY);
-        int samples_read = bytes_read / 4;
-        if (samples_read == BUFF_SIZE)
-        {
-            // Send data to the queue
-            if (xQueueSend(sample_queue, (void *)raw_samples, portMAX_DELAY) != pdTRUE)
-            {
-                printf("Failed to send data to queue\n");
-            }
+        if (i2s_channel_read(rx_chan, (char *)i2s_readraw_buff, SAMPLE_SIZE, &bytes_read, 1000) == ESP_OK) {
+            printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
+            // Write the samples to the WAV file
+            fwrite(i2s_readraw_buff, bytes_read, 1, f);
+            flash_wr_size += bytes_read;
+        } else {
+            printf("Read Failed!\n");
         }
-        fwrite(raw_samples, bytes_read, 1, f);
-        flash_wr_size += bytes_read;
     }
 
     gpio_set_level(LED_PIN, 0);
     ESP_LOGI(TAG, "Recording done!");
     fclose(f);
     ESP_LOGI(TAG, "File written on SDCard");
+
+    // All done, unmount partition and disable SPI peripheral
+    esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, card);
+    ESP_LOGI(TAG, "Card unmounted");
+    // Deinitialize the bus after all devices are removed
+    spi_bus_free(host.slot);
 
 }
 
@@ -215,7 +218,7 @@ static void record_wave_task(void *args)
         ESP_ERROR_CHECK(i2s_channel_disable(rx_chan));
 #endif
          //ESP_ERROR_CHECK(i2s_del_channel(rx_chan));
-
+        vTaskDelete(NULL);
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
     gpio_set_level(LED_PIN, 0);
@@ -350,7 +353,7 @@ void app_main()
 
     // Acquire a I2S PDM channel for the PDM digital microphone
     i2s_init_std_simplex();
-    i2s_channel_enable(rx_chan);
+    //i2s_channel_enable(rx_chan);
     gpio_set_level(LED_PIN, 1);
   //clock_init();
     xTaskCreate(record_wave_task, "i2s_example_read_task", 32384, NULL, 5, NULL);
