@@ -41,7 +41,7 @@
 #define PIN_SDA             GPIO_NUM_5
 #define PIN_SCL             GPIO_NUM_6
 #define CONFIG_EXAMPLE_SAMPLE_RATE 44100
-#define CONFIG_EXAMPLE_BIT_SAMPLE 32
+#define CONFIG_EXAMPLE_BIT_SAMPLE 16
 #define CONFIG_EXAMPLE_I2S_DATA_GPIO 9
 #define CONFIG_EXAMPLE_I2S_CLK_GPIO 11
 #define CONFIG_SPI_MOSI_GPIO GPIO_NUM_37
@@ -60,7 +60,7 @@ static const char *TAG = "FFT";
 #define SPI_DMA_CHAN        SPI_DMA_CH_AUTO
 #define NUM_CHANNELS        (1) // For mono recording only!
 #define SD_MOUNT_POINT      "/sdcard"
-#define SAMPLE_SIZE         (CONFIG_EXAMPLE_BIT_SAMPLE * 1024)
+#define SAMPLE_SIZE         (CONFIG_EXAMPLE_BIT_SAMPLE * BUFF_SIZE)
 #define BYTE_RATE           (CONFIG_EXAMPLE_SAMPLE_RATE * (CONFIG_EXAMPLE_BIT_SAMPLE / 8)) * NUM_CHANNELS
 #define LED_PIN GPIO_NUM_48
 // When testing SD and SPI modes, keep in mind that once the card has been
@@ -178,17 +178,22 @@ void record_wav(uint32_t rec_time)
     gpio_set_level(LED_PIN, 1);
 
     ESP_LOGI(TAG, "Starting recording for %d seconds!", CONFIG_REC_TIME);
-
+    uint32_t second_recorded = 0;
     // Start recording
     while (flash_wr_size < flash_rec_time)
     {
         size_t bytes_read = 0;
         // Read the RAW samples from the microphone
         if (i2s_channel_read(rx_chan, (char *)i2s_readraw_buff, SAMPLE_SIZE, &bytes_read, 1000) == ESP_OK) {
-            printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
+            //printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
             // Write the samples to the WAV file
+            int samples_read = bytes_read / 4;
             fwrite(i2s_readraw_buff, bytes_read, 1, f);
             flash_wr_size += bytes_read;
+            if (flash_wr_size/BYTE_RATE - second_recorded >= 1){
+              second_recorded = flash_wr_size/BYTE_RATE;
+              ESP_LOGW(TAG, "[ * ] Recording ... %d", second_recorded);
+            }
         } else {
             printf("Read Failed!\n");
         }
@@ -286,7 +291,7 @@ static void i2s_init_std_simplex(void)
 
     i2s_std_config_t rx_std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(CONFIG_EXAMPLE_SAMPLE_RATE),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED, // some codecs may require mclk signal, this example doesn't need it
             .bclk = CONFIG_EXAMPLE_I2S_CLK_GPIO,
@@ -357,7 +362,7 @@ void app_main()
     gpio_set_level(LED_PIN, 1);
   //clock_init();
     xTaskCreate(record_wave_task, "i2s_example_read_task", 32384, NULL, 5, NULL);
-    xTaskCreate(fft_task, "fft_task", 8096, fft_analysis, 5, NULL);
+    //xTaskCreate(fft_task, "fft_task", 8096, fft_analysis, 5, NULL);
 
   while (1)
   {
