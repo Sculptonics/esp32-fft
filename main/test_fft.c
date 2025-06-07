@@ -41,7 +41,7 @@
 #define PIN_SDA             GPIO_NUM_5
 #define PIN_SCL             GPIO_NUM_6
 #define CONFIG_EXAMPLE_SAMPLE_RATE 44100
-#define CONFIG_EXAMPLE_BIT_SAMPLE 16
+#define CONFIG_EXAMPLE_BIT_SAMPLE 24
 #define CONFIG_EXAMPLE_I2S_DATA_GPIO 9
 #define CONFIG_EXAMPLE_I2S_CLK_GPIO 11
 #define CONFIG_SPI_MOSI_GPIO GPIO_NUM_37
@@ -70,7 +70,7 @@ sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 sdmmc_card_t *card;
 i2s_chan_handle_t rx_handle = NULL;
 static i2s_chan_handle_t rx_chan; // I2S rx channel handler
-static int16_t i2s_readraw_buff[SAMPLE_SIZE];
+static int16_t i2s_readraw_buff[SAMPLE_SIZE/8];
 QueueHandle_t sample_queue, frequency_queue;
 
 //int32_t raw_samples[BUFF_SIZE] = {0};
@@ -97,18 +97,28 @@ static void fft_task(void *args)
         // Receive data from the queue
         if (xQueueReceive(sample_queue, (void *)fft_samples, portMAX_DELAY) == pdTRUE)
         {
-
+            int min = fft_samples[0];
+            int max = fft_samples[0];
             // Fill array with some dummy data
             for (int k = 0 ; k < fft_analysis->size ; k++){
               fft_analysis->input[k] = fft_samples[k];
-               //ESP_LOGI(TAG, "%d-th smp : %f", k, fft_samples[k]);
+              if (fft_samples[k] < min) {
+                min = fft_samples[k];
+              }
+              if (fft_samples[k] > max) {
+                max = fft_samples[k];
+              }
+              
+              //ESP_LOGI(TAG, "%d-th smp : %d", k, fft_samples[k]);
             }
             // Execute transformation
-            //fft_execute(fft_analysis);
+            fft_execute(fft_analysis);
             // Now do something with the output
             //ESP_LOGI(TAG,"DC component : %f", fft_analysis->output[0]);  // DC is at [0]
-            /*u8g2_ClearBuffer(&u8g2);
-            int scale = fft_analysis->size/2/u8g2.height;
+            u8g2_ClearBuffer(&u8g2);
+            int scale = fft_analysis->size/u8g2.width;
+            float scaleYsig = max/(u8g2.height/2);
+            printf("scale: %f\n", scaleYsig);
             int real0 = sqrt(pow (fft_analysis->output[2], 2) + pow(fft_analysis->output[2+1], 2));
             for (int k = 1 ; k < fft_analysis->size / 2 ; k+=scale){
               //ESP_LOGI(TAG, "%d-th freq : %f+j%f", k, fft_analysis->output[2*k], fft_analysis->output[2*k+1]);
@@ -119,7 +129,14 @@ static void fft_task(void *args)
                                    k/scale + 1, u8g2.height - ((int)real1 + u8g2.height/2));
               real0 = real1;
             }
-            u8g2_SendBuffer(&u8g2);*/
+            int sig0 = fft_analysis->input[0];
+            for (int k = 1 ; k < fft_analysis->size ; k+=scale){
+              int sig1 = fft_analysis->input[k+1];
+              u8g2_DrawLine(&u8g2, k/scale,     u8g2.height - ((int)(sig0/scaleYsig) + u8g2.height/2), 
+                                   k/scale + 1, u8g2.height - ((int)(sig1/scaleYsig) + u8g2.height/2));
+              sig0 = sig1;
+            }
+            u8g2_SendBuffer(&u8g2);
               //printf("Middle component : %f\n", fft_analysis->output[1]);  // N/2 is real and stored at [1]
         }
         vTaskDelay(pdMS_TO_TICKS(80));
@@ -162,7 +179,7 @@ void record_wav(uint32_t rec_time)
     }
 
     // printf("outside unlink if \n");
-
+/*
     // Create new WAV file
     FILE *f = fopen(file_path, "a");
     if (f == NULL)
@@ -170,9 +187,9 @@ void record_wav(uint32_t rec_time)
         ESP_LOGE(TAG, "Failed to open file for writing");
         return;
     }
-
+*/
     // Write the header to the WAV file
-    fwrite(&wav_header, sizeof(wav_header), 1, f);
+    //fwrite(&wav_header, sizeof(wav_header), 1, f);
 
     i2s_channel_enable(rx_chan);
     gpio_set_level(LED_PIN, 1);
@@ -184,12 +201,20 @@ void record_wav(uint32_t rec_time)
     {
         size_t bytes_read = 0;
         // Read the RAW samples from the microphone
-        if (i2s_channel_read(rx_chan, (char *)i2s_readraw_buff, SAMPLE_SIZE, &bytes_read, 1000) == ESP_OK) {
+        if (i2s_channel_read(rx_chan, (char *)i2s_readraw_buff, sizeof(int32_t) * BUFF_SIZE, &bytes_read, 1000) == ESP_OK) {
             //printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
             // Write the samples to the WAV file
-            int samples_read = bytes_read / 4;
-            fwrite(i2s_readraw_buff, bytes_read, 1, f);
+            int samples_read = bytes_read / sizeof(int32_t);
+            //fwrite(i2s_readraw_buff, bytes_read, 1, f);
             flash_wr_size += bytes_read;
+            for (int k = 0 ; k < 10 ; k++){
+              //ESP_LOGI(TAG, "%d-th smp : %d", k, i2s_readraw_buff[k]);
+            }
+            // Send data to the queue
+            if (xQueueSend(sample_queue, (void *)i2s_readraw_buff, portMAX_DELAY) != pdTRUE)
+            {
+                printf("Failed to send data to queue\n");
+            }
             if (flash_wr_size/BYTE_RATE - second_recorded >= 1){
               second_recorded = flash_wr_size/BYTE_RATE;
               ESP_LOGW(TAG, "[ * ] Recording ... %d", second_recorded);
@@ -201,15 +226,15 @@ void record_wav(uint32_t rec_time)
 
     gpio_set_level(LED_PIN, 0);
     ESP_LOGI(TAG, "Recording done!");
-    fclose(f);
+    //fclose(f);
     ESP_LOGI(TAG, "File written on SDCard");
-
+/*
     // All done, unmount partition and disable SPI peripheral
     esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, card);
     ESP_LOGI(TAG, "Card unmounted");
     // Deinitialize the bus after all devices are removed
     spi_bus_free(host.slot);
-
+*/
 }
 
 static void record_wave_task(void *args)
@@ -222,11 +247,12 @@ static void record_wave_task(void *args)
 #ifdef useSD
         ESP_ERROR_CHECK(i2s_channel_disable(rx_chan));
 #endif
+        gpio_set_level(LED_PIN, 0);
          //ESP_ERROR_CHECK(i2s_del_channel(rx_chan));
-        vTaskDelete(NULL);
+        //vTaskDelete(NULL);
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
-    gpio_set_level(LED_PIN, 0);
+    
     vTaskDelete(NULL);
 }
 
@@ -291,7 +317,7 @@ static void i2s_init_std_simplex(void)
 
     i2s_std_config_t rx_std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(CONFIG_EXAMPLE_SAMPLE_RATE),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED, // some codecs may require mclk signal, this example doesn't need it
             .bclk = CONFIG_EXAMPLE_I2S_CLK_GPIO,
@@ -362,7 +388,7 @@ void app_main()
     gpio_set_level(LED_PIN, 1);
   //clock_init();
     xTaskCreate(record_wave_task, "i2s_example_read_task", 32384, NULL, 5, NULL);
-    //xTaskCreate(fft_task, "fft_task", 8096, fft_analysis, 5, NULL);
+    xTaskCreate(fft_task, "fft_task", 8096, fft_analysis, 5, NULL);
 
   while (1)
   {
