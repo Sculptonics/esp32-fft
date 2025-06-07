@@ -116,26 +116,38 @@ static void fft_task(void *args)
             // Now do something with the output
             //ESP_LOGI(TAG,"DC component : %f", fft_analysis->output[0]);  // DC is at [0]
             u8g2_ClearBuffer(&u8g2);
-            int scale = fft_analysis->size/u8g2.width;
+            int scaleXfft = fft_analysis->size/2/u8g2.width;
             float scaleYsig = max/(u8g2.height/2);
-            printf("scale: %f\n", scaleYsig);
-            int real0 = sqrt(pow (fft_analysis->output[2], 2) + pow(fft_analysis->output[2+1], 2));
-            for (int k = 1 ; k < fft_analysis->size / 2 ; k+=scale){
+            //printf("scale Sig: %f\n", scaleYsig);
+            int maxf = 0;
+            for (int k = 1 ; k < fft_analysis->size / 2 ; k+=1){
               //ESP_LOGI(TAG, "%d-th freq : %f+j%f", k, fft_analysis->output[2*k], fft_analysis->output[2*k+1]);
-              float real1 = sqrt(pow (fft_analysis->output[2*(k+scale)], 2) + pow(fft_analysis->output[2*(k+scale)+1], 2));
+              float real1 = sqrt(pow (fft_analysis->output[2*k], 2) + pow(fft_analysis->output[2*k+1], 2));
+              if (real1 > maxf) {
+                maxf = real1;
+              }
+            }
+            int scaleYfft = maxf/(u8g2.height/2);
+            //printf("max FFT: %f\n", maxf);
+            int real0 = sqrt(pow (fft_analysis->output[2], 2) + pow(fft_analysis->output[2+1], 2));
+            for (int k = 1 ; k < fft_analysis->size / 2 ; k+=scaleXfft){
+              //ESP_LOGI(TAG, "%d-th freq : %f+j%f", k, fft_analysis->output[2*k], fft_analysis->output[2*k+1]);
+              float real1 = sqrt(pow (fft_analysis->output[2*(k+scaleXfft)], 2) + pow(fft_analysis->output[2*(k+scaleXfft)+1], 2));
               ESP_LOGD(TAG, "%d-th freq : %f", k, real0);
               
-              u8g2_DrawLine(&u8g2, k/scale,     u8g2.height - ((int)real0 + u8g2.height/2), 
-                                   k/scale + 1, u8g2.height - ((int)real1 + u8g2.height/2));
+              u8g2_DrawLine(&u8g2, k/scaleXfft,     u8g2.height - ((int)(real0/scaleYfft)+1), 
+                                   k/scaleXfft + 1, u8g2.height - ((int)(real1/scaleYfft)+1));
               real0 = real1;
             }
-            int sig0 = fft_analysis->input[0];
+
+
+            /*int sig0 = fft_analysis->input[0];
             for (int k = 1 ; k < fft_analysis->size ; k+=scale){
               int sig1 = fft_analysis->input[k+1];
               u8g2_DrawLine(&u8g2, k/scale,     u8g2.height - ((int)(sig0/scaleYsig) + u8g2.height/2), 
                                    k/scale + 1, u8g2.height - ((int)(sig1/scaleYsig) + u8g2.height/2));
               sig0 = sig1;
-            }
+            }*/
             u8g2_SendBuffer(&u8g2);
               //printf("Middle component : %f\n", fft_analysis->output[1]);  // N/2 is real and stored at [1]
         }
@@ -361,7 +373,7 @@ void app_main()
   
     gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
     // Mount the SDCard for recording the audio file
-    sample_queue = xQueueCreate(10, BUFF_SIZE * sizeof(int32_t));
+    sample_queue = xQueueCreate(1, BUFF_SIZE * sizeof(int32_t));
     frequency_queue = xQueueCreate(2048, sizeof(float));
 
     if (sample_queue == NULL)
